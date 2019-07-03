@@ -258,14 +258,23 @@ Set objFileToWrite = Nothing
 
                 Console.WriteLine("[*] Creation of process returned   : {0}", outParams["returnValue"]);
                 Console.WriteLine("[*] Process ID                     : {0}", outParams["processId"]);
-
+                int count = 0;
                 while (true)
                 {
                     string New_WMIProperty = GetWMIProperty(host, username, password);
                     if (New_WMIProperty == Original_WMIProperty)
                     {
-                        Console.WriteLine("[*] Tring get result...");
-                        Thread.Sleep(3000);
+                        if (count < 3)
+                        {
+                            count++;
+                            Console.WriteLine("[*] Tring get result...");
+                            Thread.Sleep(3000);
+                        }
+                        else {
+                            Console.WriteLine("[-] Maybe no result. exit...");
+                            System.Environment.Exit(0);
+                        }                       
+                        
                     }
                     else
                     {
