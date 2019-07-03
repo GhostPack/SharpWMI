@@ -40,3 +40,8 @@ SharpWMI is licensed under the BSD 3-Clause license.
 We are not planning on releasing binaries for SharpWMI, so you will have to compile yourself :)
 
 SharpWMI has been built against .NET 3.5 and is compatible with [Visual Studio 2015 Community Edition](https://go.microsoft.com/fwlink/?LinkId=532606&clcid=0x409). Simply open up the project .sln, choose "release", and build.
+
+
+## 增加可回显功能
+
+![](https://blogpics-1251691280.file.myqcloud.com/imgs/20190703200645.png)
