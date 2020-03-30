@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Management;
 
@@ -20,7 +21,9 @@ Set objFileToWrite = Nothing
             Console.WriteLine("\r\n  SharpWMI\r\n");
             Console.WriteLine("    Local system enumeration  :\r\n        SharpWMI.exe action=query query=\"select * from win32_service\" [namespace=BLAH]");
             Console.WriteLine("    Remote system enumeration :\r\n        SharpWMI.exe action=query computername=HOST1[,HOST2,...] query=\"select * from win32_service\" [namespace=BLAH]");
+            Console.WriteLine("    Remote firewall enumeration :\r\n        SharpWMI.exe action=firewall computername=HOST1[,HOST2,...]");
             Console.WriteLine("    Remote process creation   :\r\n        SharpWMI.exe action=create computername=HOST[,HOST2,...] command=\"C:\\temp\\process.exe [args]\"");
+            Console.WriteLine("    Remote process termination :\r\n        SharpWMI.exe action=kill process=[notepad.exe | 123] computername=HOST1[,HOST2,...]");
             Console.WriteLine("    Remote VBS execution      :\r\n        SharpWMI.exe action=executevbs computername=HOST[,HOST2,...] [eventname=blah]\r\n");
 
             Console.WriteLine("    Note: Any remote function also takes an optional \"username=DOMAIN\\user\" \"password=Password123!\"\r\n");
@@ -30,7 +33,6 @@ Set objFileToWrite = Nothing
             Console.WriteLine("    SharpWMI.exe action=query computername=primary.testlab.local query=\"select * from win32_service\"");
             Console.WriteLine("    SharpWMI.exe action=query computername=primary,secondary query=\"select * from win32_process\"");
             Console.WriteLine("    SharpWMI.exe action=create computername=primary.testlab.local command=\"powershell.exe -enc ZQBj...\"");
-            Console.WriteLine("    SharpWMI.exe action=executevbs computername=primary.testlab.local");
             Console.WriteLine("    SharpWMI.exe action=executevbs computername=primary.testlab.local username=\"TESTLAB\\harmj0y\" password=\"Password123!\"");
         }
 
@@ -193,6 +195,166 @@ Set objFileToWrite = Nothing
 
                 Console.WriteLine("  Creation of process returned   : {0}", outParams["returnValue"]);
                 Console.WriteLine("  Process ID                     : {0}\r\n", outParams["processId"]);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(String.Format("  Exception : {0}", ex.Message));
+            }
+        }
+
+        static void RemoteWMIProcessKill(string host, string processNameOrPid, string username, string password)
+        {
+
+            int pid = 0;
+            bool parseResult = int.TryParse(processNameOrPid, out pid);
+
+            string wmiNameSpace = "root\\cimv2";
+
+            ConnectionOptions options = new ConnectionOptions();
+
+            Console.WriteLine("\r\n  Scope: \\\\{0}\\{1}", host, wmiNameSpace);
+
+            if (!String.IsNullOrEmpty(username))
+            {
+                Console.WriteLine("  User credentials: {0}", username);
+                options.Username = username;
+                options.Password = password;
+            }
+            Console.WriteLine();
+
+            ManagementScope scope = new ManagementScope(String.Format("\\\\{0}\\{1}", host, wmiNameSpace), options);
+
+            try
+            {
+                scope.Connect();
+
+                string queryStr = "";
+                if(pid == 0)
+                {
+                    queryStr = $"Select * from Win32_Process where Name='{processNameOrPid}'";
+                }
+                else
+                {
+                    queryStr = $"Select * from Win32_Process where ProcessId='{pid}'";
+                }
+                ObjectQuery query = new ObjectQuery(queryStr);
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query);
+                ManagementObjectCollection data = searcher.Get();
+
+                Console.WriteLine();
+
+                if (data.Count == 0)
+                {
+                    Console.WriteLine($"[X] No process found with the name/PID '{processNameOrPid}'\r\n");
+                }
+                else
+                {
+                    foreach (ManagementObject result in data)
+                    {
+                        System.Management.PropertyDataCollection props = result.Properties;
+                       
+                        Console.WriteLine($"[+] Terminating {props["name"].Value} (PID {props["ProcessId"].Value})\r\n");
+                        result.InvokeMethod("Terminate", new object[] { });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(String.Format("  Exception : {0}", ex.Message));
+            }
+        }
+
+        static void RemoteWMIFirewall(string host, string username, string password)
+        {
+            string wmiNameSpace = "ROOT\\StandardCIMV2";
+
+            ConnectionOptions options = new ConnectionOptions();
+
+            Console.WriteLine("\r\n  Scope: \\\\{0}\\{1}", host, wmiNameSpace);
+
+            if (!String.IsNullOrEmpty(username))
+            {
+                Console.WriteLine("  User credentials: {0}", username);
+                options.Username = username;
+                options.Password = password;
+            }
+            Console.WriteLine();
+
+            ManagementScope scope = new ManagementScope(String.Format("\\\\{0}\\{1}", host, wmiNameSpace), options);
+
+            Dictionary<string, ArrayList> firewallRules = new Dictionary<string, ArrayList>();
+
+            try
+            {
+                scope.Connect();
+
+                ObjectQuery query = new ObjectQuery("SELECT Enabled,DisplayName,Action,Direction,InstanceID from MSFT_NetFirewallRule WHERE Enabled=1");
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query);
+                ManagementObjectCollection data = searcher.Get();
+
+                foreach (ManagementObject result in data)
+                {
+                    System.Management.PropertyDataCollection props = result.Properties;
+
+                    string instanceID = props["InstanceID"].Value.ToString();
+
+                    ArrayList ruleData = new ArrayList();
+                    ruleData.Add(props["DisplayName"].Value.ToString());
+                    ruleData.Add(props["Action"].Value.ToString());
+                    ruleData.Add(props["Direction"].Value.ToString());
+
+                    firewallRules[instanceID] = ruleData;
+                }
+
+                ObjectQuery query2 = new ObjectQuery("SELECT InstanceID,LocalPort from MSFT_NetProtocolPortFilter WHERE Protocol='TCP'");
+                ManagementObjectSearcher searcher2 = new ManagementObjectSearcher(scope, query2);
+                ManagementObjectCollection data2 = searcher2.Get();
+                foreach (ManagementObject result in data2)
+                {
+                    System.Management.PropertyDataCollection props = result.Properties;
+
+                    if ( (props["LocalPort"].Value != null))
+                    {
+                        string instanceID = props["InstanceID"].Value.ToString();
+                        if (firewallRules.ContainsKey(instanceID))
+                        {
+                            string[] localPorts = (string[])props["LocalPort"].Value;
+
+                            Console.WriteLine("Rulename   : {0}", firewallRules[instanceID][0]);
+                            if (firewallRules[instanceID][1].ToString() == "2")
+                            {
+                                Console.WriteLine("Action     : {0} (Allow)", firewallRules[instanceID][1]);
+                            }
+                            else if (firewallRules[instanceID][1].ToString() == "3")
+                            {
+                                Console.WriteLine("Action     : {0} (AllowBypass)", firewallRules[instanceID][1]);
+                            }
+                            else if (firewallRules[instanceID][1].ToString() == "4")
+                            {
+                                Console.WriteLine("Action     : {0} (Block)", firewallRules[instanceID][1]);
+                            }
+                            else
+                            {
+                                Console.WriteLine("Action     : {0} (Unknown)", firewallRules[instanceID][1]);
+                            }
+
+                            if (firewallRules[instanceID][2].ToString() == "1")
+                            {
+                                Console.WriteLine("Direction  : {0} (Inbound)", firewallRules[instanceID][2]);
+                            }
+                            else if (firewallRules[instanceID][2].ToString() == "2")
+                            {
+                                Console.WriteLine("Direction  : {0} (Outbound)", firewallRules[instanceID][2]);
+                            }
+                            else
+                            {
+                                Console.WriteLine("Direction  : {0} (Unknown)", firewallRules[instanceID][2]);
+                            }
+
+                            Console.WriteLine("LocalPorts : {0}\n", localPorts);
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -422,6 +584,23 @@ Set objFileToWrite = Nothing
                 }
             }
 
+            else if (arguments["action"] == "firewall")
+            {
+                if (arguments.ContainsKey("computername"))
+                {
+                    // remote query
+                    string[] computerNames = arguments["computername"].Split(',');
+                    foreach (string computerName in computerNames)
+                    {
+                        RemoteWMIFirewall(computerName, username, password);
+                    }
+                }
+                else
+                {
+                    Usage();
+                }
+            }
+
             else if (arguments["action"] == "create")
             {
                 // remote process call creation
@@ -437,6 +616,29 @@ Set objFileToWrite = Nothing
                 {
                     Usage();
                     return;
+                }
+            }
+
+            else if (arguments["action"] == "kill")
+            {
+                if (!arguments.ContainsKey("process"))
+                {
+                    Usage();
+                    return;
+                }
+
+                if (arguments.ContainsKey("computername"))
+                {
+                    // remote query
+                    string[] computerNames = arguments["computername"].Split(',');
+                    foreach (string computerName in computerNames)
+                    {
+                        RemoteWMIProcessKill(computerName, arguments["process"], username, password);
+                    }
+                }
+                else
+                {
+                    Usage();
                 }
             }
 
@@ -462,8 +664,8 @@ Set objFileToWrite = Nothing
                     return;
                 }
             }
-
             else
+
             {
                 Usage();
                 return;

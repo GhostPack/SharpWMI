@@ -2,7 +2,7 @@
 
 ----
 
-SharpWMI is a C# implementation of various WMI functionality. This includes local/remote WMI queries, remote WMI process creation through win32_process, and remote execution of arbitrary VBS through WMI event subscriptions. Alternate credentials are also supported for remote methods. 
+SharpWMI is a C# implementation of various WMI functionality. This includes local/remote WMI queries, remote WMI process creation through win32_process, killing of remote processes, enumeration of remote firewall information, and remote execution of arbitrary VBS through WMI event subscriptions. Alternate credentials are also supported for remote methods. 
 
 [@harmj0y](https://twitter.com/harmj0y) is the primary author.
 
@@ -12,27 +12,35 @@ SharpWMI is licensed under the BSD 3-Clause license.
 
     Local system enumeration  :
         SharpWMI.exe action=query query="select * from win32_service" [namespace=BLAH]
-
     Remote system enumeration :
         SharpWMI.exe action=query computername=HOST1[,HOST2,...] query="select * from win32_service" [namespace=BLAH]
-
+    Remote firewall enumeration :
+        SharpWMI.exe action=firewall computername=HOST1[,HOST2,...]
     Remote process creation   :
         SharpWMI.exe action=create computername=HOST[,HOST2,...] command="C:\temp\process.exe [args]"
-
+    Remote process termination :
+        SharpWMI.exe action=kill process=[notepad.exe | 123] computername=HOST1[,HOST2,...]
     Remote VBS execution      :
         SharpWMI.exe action=executevbs computername=HOST[,HOST2,...] [eventname=blah]
 
     Note: Any remote function also takes an optional "username=DOMAIN\user" "password=Password123!"
 
-    Examples:
 
-        SharpWMI.exe action=query query="select * from win32_process"
-        SharpWMI.exe action=query query="SELECT * FROM AntiVirusProduct" namespace="root\SecurityCenter2"
-        SharpWMI.exe action=query computername=primary.testlab.local query="select * from win32_service"
-        SharpWMI.exe action=query computername=primary,secondary query="select * from win32_process"
-        SharpWMI.exe action=create computername=primary.testlab.local command="powershell.exe -enc ZQBj..."
-        SharpWMI.exe action=executevbs computername=primary.testlab.local
-        SharpWMI.exe action=executevbs computername=primary.testlab.local username="TESTLAB\harmj0y" password="Password123!"
+  Examples:
+
+    SharpWMI.exe action=query query="select * from win32_process"
+    SharpWMI.exe action=query query="SELECT * FROM AntiVirusProduct" namespace="root\SecurityCenter2"
+    SharpWMI.exe action=query computername=primary.testlab.local query="select * from win32_service"
+    SharpWMI.exe action=query computername=primary,secondary query="select * from win32_process"
+    SharpWMI.exe action=create computername=primary.testlab.local command="powershell.exe -enc ZQBj..."
+    SharpWMI.exe action=executevbs computername=primary.testlab.local username="TESTLAB\harmj0y" password="Password123!"
+
+
+### Example
+
+Get local TCP netstat-style information from a remote Windows 10 machine:
+
+    SharpWMI.exe action=query computername=COMPUTER query="Select LocalPort,OwningProcess from MSFT_NetTCPConnection" namespace="ROOT\StandardCIMV2"
 
 
 ## Compile Instructions
