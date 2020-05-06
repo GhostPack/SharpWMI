@@ -34,7 +34,7 @@ NOTE:
 ### VBS Script execution:
 
 The `executevbs` action was reworked as compared to the original version of SharpWMI.
-Script specification defined in [script-specification] offers following methods to point this tool at target VBS code:
+Script specification defined in `[script-specification]` offers following methods to point this tool at target VBS code:
 
 ```
   A) Executes OS command via preset VBS code:
