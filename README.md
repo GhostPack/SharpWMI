@@ -31,6 +31,9 @@ NOTE:
   Any remote function also takes an optional "username=DOMAIN\\user" "password=Password123!"
 ```
 
+The `result=true` option on `action=exec` (alternatively `action=create`) makes SharpWMI to return command's output after remote WMI process creation. It works by storing command's output in an instance of arbitrary WMI object. That object would  then be fetched by callee and restored to it's original value.
+
+
 ### VBS Script execution:
 
 The `executevbs` action was reworked as compared to the original version of SharpWMI.
