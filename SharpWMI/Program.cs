@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Management;
 using System.Security.Cryptography;
+using System.Security.Policy;
 using System.Text;
 using System.Threading;
 
@@ -124,6 +125,9 @@ USAGE:
   Remote system enumeration: 
     SharpWMI.exe action=query computername=HOST1[,HOST2,...] query=""select * from win32_service"" [namespace=BLAH]
 
+  Remote system Logged On users enumeration:
+    SharpWMI.exe action=loggedon computername=HOST1[,HOST2,...]
+
   Remote process creation: 
     SharpWMI.exe action=exec computername=HOST[,HOST2,...] command=""C:\\temp\\process.exe [args]"" [amsi=disable] [result=true]
 
@@ -175,6 +179,8 @@ EXAMPLES:
   SharpWMI.exe action=query query =""select * from win32_process""
 
   SharpWMI.exe action=query query=""SELECT * FROM AntiVirusProduct"" namespace=""root\\SecurityCenter2""
+
+  SharpWMI.exe action=loggedon computername=primary.testlab.local
 
   SharpWMI.exe action=query computername=primary.testlab.local query=""select * from win32_service""
 
@@ -267,6 +273,93 @@ EXAMPLES:
             catch (Exception ex)
             {
                 Console.WriteLine(String.Format("[X] Exception {0}", ex.Message));
+            }
+        }
+
+        static List<Dictionary<string, string>> GetWMIQueryResults(string host, string wmiQuery, string wmiNameSpace, string username, string password)
+        {
+            if (wmiNameSpace == "")
+            {
+                wmiNameSpace = "root\\cimv2";
+            }
+
+            var output = new List<Dictionary<string, string>>();
+
+            ConnectionOptions options = new ConnectionOptions();
+
+            Console.WriteLine("\r\n  Scope: \\\\{0}\\{1}", host, wmiNameSpace);
+            Console.WriteLine("  Query: \"{0}\"\r\n", wmiQuery);
+
+            if (!String.IsNullOrEmpty(username))
+            {
+                options.Username = username;
+                options.Password = password;
+            }
+
+            ManagementScope scope = new ManagementScope(String.Format("\\\\{0}\\{1}", host, wmiNameSpace), options);
+
+            try
+            {
+                scope.Connect();
+
+                ObjectQuery query = new ObjectQuery(wmiQuery);
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query);
+                ManagementObjectCollection data = searcher.Get();
+
+                foreach (ManagementObject result in data)
+                {
+                    System.Management.PropertyDataCollection props = result.Properties;
+                    Dictionary<string, string> entry = new Dictionary<string, string>();
+
+                    foreach (System.Management.PropertyData prop in props)
+                    {
+                        entry[prop.Name] = (string)prop.Value;
+                    }
+
+                    output.Add(entry);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(String.Format("[X] WMI Exception ({0}): {1}", wmiQuery, ex.Message));
+                return null;
+            }
+
+            return output;
+        }
+
+        static void GetLoggedOnUsers(string computerName, string username, string password)
+        {
+            var loggedOns = GetWMIQueryResults(computerName, "SELECT * FROM Win32_LoggedOnUser", null, username, password);
+            if(loggedOns == null || loggedOns.Count == 0)
+            {
+                Console.WriteLine("\r\nCould not retrieve list of logged on users on {0}", computerName);
+                return;
+            }
+
+            foreach (var entry in loggedOns)
+            {
+                string user = entry["Antecedent"];
+
+                if (user.IndexOf("DWM-") != -1 || user.IndexOf("UMFD-") != -1) continue;
+
+                string domainPrefix = "Domain=\"", userPrefix = "\",Name=\"";
+                var pos = user.IndexOf(domainPrefix);
+
+                if(pos != -1)
+                {
+                    string d, u;
+                    var pos2 = user.IndexOf('"', pos + domainPrefix.Length);
+                    var pos3 = user.IndexOf(userPrefix);
+                    if (pos2 != -1 && pos3 != -1)
+                    {
+                        d = user.Substring((pos + domainPrefix.Length), pos3 - (pos + domainPrefix.Length));
+                        u = user.Substring((pos3 + userPrefix.Length), user.Length - (pos3 + userPrefix.Length) - 1);
+                        user = String.Format(@"{0}\{1}", d, u);
+                    }
+                }
+
+                Console.WriteLine("{0,-15}: {1}", computerName, user);
             }
         }
 
@@ -1120,6 +1213,22 @@ EXAMPLES:
                     foreach (string computerName in computerNames)
                     {
                         UploadFileViaWMI(computerName, username, password, fileData, arguments["dest"], disableAmsi);
+                    }
+                }
+                else
+                {
+                    Usage();
+                    return;
+                }
+            }
+            else if (arguments["action"] == "loggedon")
+            {
+                if (arguments.ContainsKey("computername"))
+                {
+                    string[] computerNames = arguments["computername"].Split(',');
+                    foreach (string computerName in computerNames)
+                    {
+                        GetLoggedOnUsers(computerName, username, password);
                     }
                 }
                 else
