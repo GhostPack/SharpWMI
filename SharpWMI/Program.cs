@@ -118,28 +118,29 @@ USAGE:
     SharpWMI.exe action=query query=""select * from win32_service"" [namespace=BLAH]
 
   Remote system enumeration: 
-    SharpWMI.exe action=query computername=HOST1[,HOST2,...] query=""select * from win32_service"" [namespace=BLAH]
+    SharpWMI.exe action=query [computername=HOST1[,HOST2,...]] query=""select * from win32_service"" [namespace=BLAH]
 
   Remote system Logged On users enumeration:
-    SharpWMI.exe action=loggedon computername=HOST1[,HOST2,...]
+    SharpWMI.exe action=loggedon [computername=HOST1[,HOST2,...]]
 
   Remote process creation: 
-    SharpWMI.exe action=exec computername=HOST[,HOST2,...] command=""C:\\temp\\process.exe [args]"" [amsi=disable] [result=true]
+    SharpWMI.exe action=exec [computername=HOST[,HOST2,...]] command=""C:\\temp\\process.exe [args]"" [amsi=disable] [result=true]
 
   Remote VBS execution: 
-    SharpWMI.exe action=executevbs computername=HOST[,HOST2,...] [script-specification] [eventname=blah] [amsi=disable] [time-specs]
+    SharpWMI.exe action=executevbs [computername=HOST[,HOST2,...]] [script-specification] [eventname=blah] [amsi=disable] [time-specs]
 
   File upload via WMI:
-    SharpWMI.exe action=upload computername=HOST[,HOST2,...] source=""C:\\source\\file.exe"" dest=""C:\\temp\\dest-file.exe"" [amsi=disable]
+    SharpWMI.exe action=upload [computername=HOST[,HOST2,...]] source=""C:\\source\\file.exe"" dest=""C:\\temp\\dest-file.exe"" [amsi=disable]
 
   List processes:
-    SharpWMI.exe action=ps computername=HOST[,HOST2,...]
+    SharpWMI.exe action=ps [computername=HOST[,HOST2,...]]
 
   Terminate process (first found):
-    SharpWMI.exe action=terminate computername=HOST[,HOST2,...] process=PID|name
+    SharpWMI.exe action=terminate process=PID|name [computername=HOST[,HOST2,...]]
 
 NOTE: 
-  Any remote function also takes an optional ""username=DOMAIN\\user"" ""password=Password123!""
+  - Any remote function also takes an optional ""username=DOMAIN\\user"" ""password=Password123!"".
+  - If computername is not specified, will target localhost.
 
 VBS Script execution:
   The 'executevbs' action was reworked as compared to the original version of SharpWMI. 
