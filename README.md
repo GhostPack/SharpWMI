@@ -30,6 +30,9 @@ SharpWMI is licensed under the BSD 3-Clause license.
   File upload via WMI:
     SharpWMI.exe action=upload [computername=HOST[,HOST2,...]] source=""C:\\source\\file.exe"" dest=""C:\\temp\\dest-file.exe"" [amsi=disable]
 
+  Remote firewall enumeration :
+    SharpWMI.exe action=firewall computername=HOST1[,HOST2,...]
+    
   List processes:
     SharpWMI.exe action=ps [computername=HOST[,HOST2,...]]
 
@@ -121,6 +124,10 @@ Script specification defined in `[script-specification]` offers following method
 
   SharpWMI.exe action=delenv name=FOO computername=primary.testlab.local
 ```
+
+Get local TCP netstat-style information from a remote Windows 10 machine:
+
+    SharpWMI.exe action=query computername=COMPUTER query="Select LocalPort,OwningProcess from MSFT_NetTCPConnection" namespace="ROOT\StandardCIMV2"
 
 
 ## Compile Instructions

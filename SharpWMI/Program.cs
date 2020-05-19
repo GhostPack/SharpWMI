@@ -1,5 +1,6 @@
 ﻿using System;
 using System.CodeDom;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -131,6 +132,9 @@ USAGE:
 
   File upload via WMI:
     SharpWMI.exe action=upload [computername=HOST[,HOST2,...]] source=""C:\\source\\file.exe"" dest=""C:\\temp\\dest-file.exe"" [amsi=disable]
+
+  Remote firewall enumeration :
+    SharpWMI.exe action=firewall computername=HOST1[,HOST2,...]
 
   List processes:
     SharpWMI.exe action=ps [computername=HOST[,HOST2,...]]
@@ -389,6 +393,104 @@ EXAMPLES:
                     Console.WriteLine("{0,-15}: {1}", computerName, ant);
                     uniqUsers.Add(ant);
                 }
+            }
+        }
+
+        static void RemoteWMIFirewall(string host, string username, string password)
+        {
+            string wmiNameSpace = "ROOT\\StandardCIMV2";
+
+            ConnectionOptions options = new ConnectionOptions();
+
+            Console.WriteLine("\r\n  Scope: \\\\{0}\\{1}", host, wmiNameSpace);
+
+            if (!String.IsNullOrEmpty(username))
+            {
+                Console.WriteLine("  User credentials: {0}", username);
+                options.Username = username;
+                options.Password = password;
+            }
+            Console.WriteLine();
+
+            ManagementScope scope = new ManagementScope(String.Format("\\\\{0}\\{1}", host, wmiNameSpace), options);
+
+            Dictionary<string, ArrayList> firewallRules = new Dictionary<string, ArrayList>();
+
+            try
+            {
+                scope.Connect();
+
+                ObjectQuery query = new ObjectQuery("SELECT Enabled,DisplayName,Action,Direction,InstanceID from MSFT_NetFirewallRule WHERE Enabled=1");
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query);
+                ManagementObjectCollection data = searcher.Get();
+
+                foreach (ManagementObject result in data)
+                {
+                    System.Management.PropertyDataCollection props = result.Properties;
+
+                    string instanceID = props["InstanceID"].Value.ToString();
+
+                    ArrayList ruleData = new ArrayList();
+                    ruleData.Add(props["DisplayName"].Value.ToString());
+                    ruleData.Add(props["Action"].Value.ToString());
+                    ruleData.Add(props["Direction"].Value.ToString());
+
+                    firewallRules[instanceID] = ruleData;
+                }
+
+                ObjectQuery query2 = new ObjectQuery("SELECT InstanceID,LocalPort from MSFT_NetProtocolPortFilter WHERE Protocol='TCP'");
+                ManagementObjectSearcher searcher2 = new ManagementObjectSearcher(scope, query2);
+                ManagementObjectCollection data2 = searcher2.Get();
+                foreach (ManagementObject result in data2)
+                {
+                    System.Management.PropertyDataCollection props = result.Properties;
+
+                    if ((props["LocalPort"].Value != null))
+                    {
+                        string instanceID = props["InstanceID"].Value.ToString();
+                        if (firewallRules.ContainsKey(instanceID))
+                        {
+                            string[] localPorts = (string[])props["LocalPort"].Value;
+
+                            Console.WriteLine("Rulename   : {0}", firewallRules[instanceID][0]);
+                            if (firewallRules[instanceID][1].ToString() == "2")
+                            {
+                                Console.WriteLine("Action     : {0} (Allow)", firewallRules[instanceID][1]);
+                            }
+                            else if (firewallRules[instanceID][1].ToString() == "3")
+                            {
+                                Console.WriteLine("Action     : {0} (AllowBypass)", firewallRules[instanceID][1]);
+                            }
+                            else if (firewallRules[instanceID][1].ToString() == "4")
+                            {
+                                Console.WriteLine("Action     : {0} (Block)", firewallRules[instanceID][1]);
+                            }
+                            else
+                            {
+                                Console.WriteLine("Action     : {0} (Unknown)", firewallRules[instanceID][1]);
+                            }
+
+                            if (firewallRules[instanceID][2].ToString() == "1")
+                            {
+                                Console.WriteLine("Direction  : {0} (Inbound)", firewallRules[instanceID][2]);
+                            }
+                            else if (firewallRules[instanceID][2].ToString() == "2")
+                            {
+                                Console.WriteLine("Direction  : {0} (Outbound)", firewallRules[instanceID][2]);
+                            }
+                            else
+                            {
+                                Console.WriteLine("Direction  : {0} (Unknown)", firewallRules[instanceID][2]);
+                            }
+
+                            Console.WriteLine("LocalPorts : {0}\n", localPorts);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(String.Format("  Exception : {0}", ex.Message));
             }
         }
 
@@ -1800,6 +1902,22 @@ EXAMPLES:
                 {
                     Usage();
                     return;
+                }
+            }
+            else if (arguments["action"] == "firewall")
+            {
+                if (arguments.ContainsKey("computername"))
+                {
+                    // remote query
+                    string[] computerNames = arguments["computername"].Split(',');
+                    foreach (string computerName in computerNames)
+                    {
+                        RemoteWMIFirewall(computerName, username, password);
+                    }
+                }
+                else
+                {
+                    Usage();
                 }
             }
             else if (arguments["action"] == "executevbs")
