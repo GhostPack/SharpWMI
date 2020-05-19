@@ -12,23 +12,42 @@ SharpWMI is licensed under the BSD 3-Clause license.
 ## Usage
 
 ```
-  Local system enumeration:
-    SharpWMI.exe action=query query="select * from win32_service" [namespace=BLAH]
+  Local system enumeration:        
+    SharpWMI.exe action=query query=""select * from win32_service"" [namespace=BLAH]
 
-  Remote system enumeration:
-    SharpWMI.exe action=query computername=HOST1[,HOST2,...] query="select * from win32_service" [namespace=BLAH]
+  Remote system enumeration: 
+    SharpWMI.exe action=query [computername=HOST1[,HOST2,...]] query=""select * from win32_service"" [namespace=BLAH]
 
-  Remote process creation:
-    SharpWMI.exe action=exec computername=HOST[,HOST2,...] command="C:\\temp\\process.exe [args]" [amsi=disable] [result=true]
+  Remote system Logged On users enumeration:
+    SharpWMI.exe action=loggedon [computername=HOST1[,HOST2,...]]
 
-  Remote VBS execution:
-    SharpWMI.exe action=executevbs computername=HOST[,HOST2,...] [script-specification] [eventname=blah] [amsi=disable] [time-specs]
+  Remote process creation: 
+    SharpWMI.exe action=exec [computername=HOST[,HOST2,...]] command=""C:\\temp\\process.exe [args]"" [amsi=disable] [result=true]
+
+  Remote VBS execution: 
+    SharpWMI.exe action=executevbs [computername=HOST[,HOST2,...]] [script-specification] [eventname=blah] [amsi=disable] [time-specs]
 
   File upload via WMI:
-    SharpWMI.exe action=upload computername=HOST[,HOST2,...] source="C:\\source\\file.exe" dest="C:\\temp\\dest-file.exe" [amsi=disable]
+    SharpWMI.exe action=upload [computername=HOST[,HOST2,...]] source=""C:\\source\\file.exe"" dest=""C:\\temp\\dest-file.exe"" [amsi=disable]
 
-NOTE:
-  Any remote function also takes an optional "username=DOMAIN\\user" "password=Password123!"
+  List processes:
+    SharpWMI.exe action=ps [computername=HOST[,HOST2,...]]
+
+  Terminate process (first found):
+    SharpWMI.exe action=terminate process=PID|name [computername=HOST[,HOST2,...]]
+
+  Get environment variables (all if name not given):
+    SharpWMI.exe action=getenv [name=VariableName] [computername=HOST[,HOST2,...]]
+
+  Set environment variable
+    SharpWMI.exe action=setenv name=VariableName value=VariableValue [computername=HOST[,HOST2,...]]
+
+  Delete an environment variable
+    SharpWMI.exe action=delenv name=VariableName [computername=HOST[,HOST2,...]]
+
+NOTE: 
+  - Any remote function also takes an optional ""username=DOMAIN\\user"" ""password=Password123!"".
+  - If computername is not specified, will target localhost.
 ```
 
 The `result=true` option on `action=exec` (alternatively `action=create`) makes SharpWMI to return command's output after remote WMI process creation. It works by storing command's output in an instance of arbitrary WMI object. That object would  then be fetched by callee and restored to it's original value.
@@ -74,23 +93,33 @@ Script specification defined in `[script-specification]` offers following method
 ### Examples:
 
 ```
-  SharpWMI.exe action=query query ="select * from win32_process"
+  SharpWMI.exe action=query query=""select * from win32_process""
 
-  SharpWMI.exe action=query query="SELECT * FROM AntiVirusProduct" namespace="root\\SecurityCenter2"
+  SharpWMI.exe action=query query=""SELECT * FROM AntiVirusProduct"" namespace=""root\\SecurityCenter2""
 
-  SharpWMI.exe action=query computername=primary.testlab.local query="select * from win32_service"
+  SharpWMI.exe action=loggedon computername=primary.testlab.local
 
-  SharpWMI.exe action=query computername=primary,secondary query="select * from win32_process"
+  SharpWMI.exe action=query computername=primary.testlab.local query=""select * from win32_service""
 
-  SharpWMI.exe action=exec computername=primary.testlab.local command="powershell.exe -enc ZQBj..."
+  SharpWMI.exe action=query computername=primary,secondary query=""select * from win32_process""
 
-  SharpWMI.exe action=exec computername=primary.testlab.local command="whoami" result=true amsi=disable
+  SharpWMI.exe action=exec computername=primary.testlab.local command=""powershell.exe -enc ZQBj...""
 
-  SharpWMI.exe action=executevbs computername=primary.testlab.local command="notepad.exe" eventname="MyLittleEvent" amsi=disable
+  SharpWMI.exe action=exec computername=primary.testlab.local command=""whoami"" result=true amsi=disable
 
-  SharpWMI.exe action=executevbs computername=primary.testlab.local username="TESTLAB\\harmj0y" password="Password123!" script="myscript.vbs"
+  SharpWMI.exe action=executevbs computername=primary.testlab.local command=""notepad.exe"" eventname=""MyLittleEvent"" amsi=disable
 
-  SharpWMI.exe action=upload computername=primary.testlab.local source="beacon.exe" dest="C:\\Windows\\temp\\foo.exe" amsi=disable
+  SharpWMI.exe action=executevbs computername=primary.testlab.local username=""TESTLAB\\harmj0y"" password=""Password123!""
+
+  SharpWMI.exe action=upload computername=primary.testlab.local source=""beacon.exe"" dest=""C:\\Windows\\temp\\foo.exe"" amsi=disable
+
+  SharpWMI.exe action=terminate computername=primary.testlab.local process=explorer
+
+  SharpWMI.exe action=getenv name=PATH computername=primary.testlab.local
+
+  SharpWMI.exe action=setenv name=FOO value=""BAR"" computername=primary.testlab.local
+
+  SharpWMI.exe action=delenv name=FOO computername=primary.testlab.local
 ```
 
 
