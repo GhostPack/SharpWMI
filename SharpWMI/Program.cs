@@ -138,6 +138,15 @@ USAGE:
   Terminate process (first found):
     SharpWMI.exe action=terminate process=PID|name [computername=HOST[,HOST2,...]]
 
+  Get environment variables (all if name not given):
+    SharpWMI.exe action=getenv [name=VariableName] [computername=HOST[,HOST2,...]]
+
+  Set environment variable
+    SharpWMI.exe action=setenv name=VariableName value=VariableValue [computername=HOST[,HOST2,...]]
+
+  Delete an environment variable
+    SharpWMI.exe action=delenv name=VariableName [computername=HOST[,HOST2,...]]
+
 NOTE: 
   - Any remote function also takes an optional ""username=DOMAIN\\user"" ""password=Password123!"".
   - If computername is not specified, will target localhost.
@@ -199,6 +208,12 @@ EXAMPLES:
   SharpWMI.exe action=upload computername=primary.testlab.local source=""beacon.exe"" dest=""C:\\Windows\\temp\\foo.exe"" amsi=disable
 
   SharpWMI.exe action=terminate computername=primary.testlab.local process=explorer
+
+  SharpWMI.exe action=getenv name=PATH computername=primary.testlab.local
+
+  SharpWMI.exe action=setenv name=FOO value=""BAR"" computername=primary.testlab.local
+
+  SharpWMI.exe action=delenv name=FOO computername=primary.testlab.local
 ");
         }
 
@@ -667,55 +682,41 @@ EXAMPLES:
             return "";
         }
 
-        private static string SetEnvVarValue(string varAndValue, string host, string user, string password, string wmiNamespace)
+        public static void GetEnvVar(string variableName, string host, string user, string password)
+        {
+            if (String.IsNullOrEmpty(variableName))
+            {
+                RemoteWMIQuery(host, "select Name,VariableValue,UserName From Win32_Environment", "root\\cimv2", user, password);
+                return;
+            }
+
+            if (variableName.IndexOf(",") != -1)
+            {
+                StringBuilder output = new StringBuilder();
+                foreach (var varName in variableName.Split(','))
+                {
+                    RemoteWMIQuery(host, String.Format("select Name,VariableValue,UserName From Win32_Environment WHERE Name='{0}'", varName), "root\\cimv2", user, password);
+                }
+
+                return;
+            }
+
+            RemoteWMIQuery(host, String.Format("select Name,VariableValue,UserName From Win32_Environment WHERE Name='{0}'", variableName), "root\\cimv2", user, password);
+        }
+
+        private static void SetEnvVarValue(string varName, string value, string host, string user, string password)
         {
             var scope = new ManagementScope();
             string r = ConnectToWMI(ref scope, host, user, password, "root\\cimv2");
             if (r.Length > 0)
             {
-                return r;
+                Console.WriteLine(r);
+                return;
             }
 
             try
             {
-                return SetEnvVarValue(scope, varAndValue, user);
-            }
-            catch (Exception ex)
-            {
-                return String.Format("[!] Could not set variable over WMI: {0}", ex.Message);
-            }
-        }
-
-        private static string SetEnvVarValue(ManagementScope scope, string varAndValue, string user)
-        {
-            StringBuilder results = new StringBuilder();
-
-            bool found = false;
-            ManagementClass configClass = new ManagementClass(scope, new ManagementPath("Win32_Environment"), null);
-
-            string variable = "", value = "", userName = "";
-
-            try
-            {
-                var pos = varAndValue.IndexOf("=");
-
-                if (pos == -1)
-                {
-                    return "[!] In order to set an environment variable using WMI - follow the form of: name=value (where value may be surrounded with quotes)";
-                }
-
-                variable = varAndValue.Substring(0, pos);
-                value = varAndValue.Substring(pos + 1);
-
-                if (value[0] == '"')
-                {
-                    if (value[value.Length - 1] != '"')
-                    {
-                        return "[!] Environment value's started with quote but not ended with one. Syntax: name=\"value\"";
-                    }
-
-                    value = value.Substring(1, value.Length - 2);
-                }
+                string userName = "";
 
                 if (!String.IsNullOrEmpty(user))
                 {
@@ -726,13 +727,30 @@ EXAMPLES:
                     userName = GetWmiProperty(scope, "Win32_ComputerSystem", "UserName");
                 }
 
+                Console.WriteLine(SetEnvVarValue(scope, varName, value, userName));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(String.Format("[!] Could not set variable over WMI: {0}", ex.Message));
+            }
+        }
+
+        private static string SetEnvVarValue(ManagementScope scope, string varName, string value, string userName)
+        {
+            StringBuilder results = new StringBuilder();
+
+            bool found = false;
+            ManagementClass configClass = new ManagementClass(scope, new ManagementPath("Win32_Environment"), null);
+
+            try
+            {
                 var variables = configClass.GetInstances();
                 foreach (ManagementObject envvar in variables)
                 {
                     string name = (string)envvar.GetPropertyValue("Name");
                     if (String.IsNullOrEmpty(name)) continue;
 
-                    if (String.Compare(name, variable, StringComparison.OrdinalIgnoreCase) == 0)
+                    if (String.Compare(name, varName, StringComparison.OrdinalIgnoreCase) == 0)
                     {
                         //Console.WriteLine("[.] Overridding an environment variable: {0} = \"{1}\"", variable, value);
 
@@ -749,7 +767,7 @@ EXAMPLES:
                     //Console.WriteLine("[.] Setting a new environment variable on: {0} = \"{1}\"", variable, value);
 
                     ManagementObject mo = configClass.CreateInstance();
-                    mo["Name"] = variable;
+                    mo["Name"] = varName;
                     mo["UserName"] = userName;
                     mo["VariableValue"] = value.Trim();
                     mo.Put();
@@ -757,10 +775,41 @@ EXAMPLES:
             }
             catch (Exception ex)
             {
-                throw new Exception(String.Format("[!] Could not set variable over WMI ({0}: {1} = '{2}'):    {3}", userName, variable, value, ex.ToString()));
+                throw new Exception(String.Format("[!] Could not set variable over WMI ({0}: {1} = '{2}'):    {3}", userName, varName, value, ex.ToString()));
             }
 
             return results.ToString();
+        }
+
+        private static void DelEnvVar(string varName, string host, string user, string password)
+        {
+            var scope = new ManagementScope();
+            string r = ConnectToWMI(ref scope, host, user, password, "root\\cimv2");
+            if (r.Length > 0)
+            {
+                Console.WriteLine(r);
+                return;
+            }
+
+            string userName = "";
+
+            try
+            {
+                if (!String.IsNullOrEmpty(user))
+                {
+                    userName = String.Format("{0}\\{1}", GetWmiProperty(scope, "Win32_ComputerSystem", "Name"), user);
+                }
+                else
+                {
+                    userName = GetWmiProperty(scope, "Win32_ComputerSystem", "UserName");
+                }
+
+                Console.WriteLine(DelEnvVar(scope, varName, userName));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(String.Format("[!] Could not set variable over WMI: {0}", ex.Message));
+            }
         }
 
         private static string DelEnvVar(ManagementScope scope, string varName, string userName)
@@ -1007,7 +1056,7 @@ EXAMPLES:
 
                 try
                 {
-                    SetEnvVarValue(scope, String.Format("{0}=\"{1}\"", varName, tmpcmd), user);
+                    SetEnvVarValue(scope, varName, tmpcmd, userName);
                 }
                 catch (Exception ex)
                 {
@@ -1050,7 +1099,7 @@ EXAMPLES:
 
                         try
                         {
-                            SetEnvVarValue(scope, String.Format("{0}=\"{1}\"", varName, ""), user);
+                            SetEnvVarValue(scope, varName, "", userName);
                         }
                         catch { }
 
@@ -1692,6 +1741,49 @@ EXAMPLES:
                 foreach (string computerName in computerNames)
                 {
                     GetProcesses(computerName, username, password);
+                }
+            }
+            else if (arguments["action"] == "getenv")
+            {
+                string varName = "";
+                if (arguments.ContainsKey("name")) varName = arguments["name"];
+
+                string[] computerNames = arguments["computername"].Split(',');
+                foreach (string computerName in computerNames)
+                {
+                    GetEnvVar(varName, computerName, username, password);
+                }
+            }
+            else if (arguments["action"] == "setenv")
+            {
+                if (arguments.ContainsKey("name") && arguments.ContainsKey("value"))
+                {
+                    string[] computerNames = arguments["computername"].Split(',');
+                    foreach (string computerName in computerNames)
+                    {
+                        SetEnvVarValue(arguments["name"], arguments["value"], computerName, username, password);
+                    }
+                }
+                else
+                {
+                    Usage();
+                    return;
+                }
+            }
+            else if (arguments["action"] == "delenv")
+            {
+                if (arguments.ContainsKey("name"))
+                {
+                    string[] computerNames = arguments["computername"].Split(',');
+                    foreach (string computerName in computerNames)
+                    {
+                        DelEnvVar(arguments["name"], computerName, username, password);
+                    }
+                }
+                else
+                {
+                    Usage();
+                    return;
                 }
             }
             else if (arguments["action"] == "terminate")
