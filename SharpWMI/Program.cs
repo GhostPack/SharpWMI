@@ -113,6 +113,7 @@ AUTHORS:
   Enhancements, VBS flexibility, more actions:  Mariusz B. / mgeeky @mariuszbit
   WMI code-exec output idea:                    Evi1cg @Ridter
   AMSI evasion code taken from SharpMove:       Steven Flores 0xthirteen
+  Install MSI files:                            Justin Bui @slyd0g
 
 USAGE:
   Local system enumeration:        
@@ -145,11 +146,14 @@ USAGE:
   Get environment variables (all if name not given):
     SharpWMI.exe action=getenv [name=VariableName] [computername=HOST[,HOST2,...]]
 
-  Set environment variable
+  Set environment variable:
     SharpWMI.exe action=setenv name=VariableName value=VariableValue [computername=HOST[,HOST2,...]]
 
-  Delete an environment variable
+  Delete an environment variable:
     SharpWMI.exe action=delenv name=VariableName [computername=HOST[,HOST2,...]]
+
+  Install MSI file:
+    SharpWMI.exe action=install [computername=HOST[,HOST2,...]] path=""C:\\temp\\installer.msi"" [amsi=disable]
 
 NOTE: 
   - Any remote function also takes an optional ""username=DOMAIN\\user"" ""password=Password123!"".
@@ -218,6 +222,8 @@ EXAMPLES:
   SharpWMI.exe action=setenv name=FOO value=""BAR"" computername=primary.testlab.local
 
   SharpWMI.exe action=delenv name=FOO computername=primary.testlab.local
+
+  SharpWMI.exe action=install computername=primary.testlab.local path=""C:\\temp\\installer.msi""
 ");
         }
 
