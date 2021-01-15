@@ -42,11 +42,14 @@ SharpWMI is licensed under the BSD 3-Clause license.
   Get environment variables (all if name not given):
     SharpWMI.exe action=getenv [name=VariableName] [computername=HOST[,HOST2,...]]
 
-  Set environment variable
+  Set environment variable:
     SharpWMI.exe action=setenv name=VariableName value=VariableValue [computername=HOST[,HOST2,...]]
 
-  Delete an environment variable
+  Delete an environment variable:
     SharpWMI.exe action=delenv name=VariableName [computername=HOST[,HOST2,...]]
+
+  Install MSI file:
+    SharpWMI.exe action=install [computername=HOST[,HOST2,...]] path=""C:\\temp\\installer.msi"" [amsi=disable]
 
 NOTE: 
   - Any remote function also takes an optional ""username=DOMAIN\\user"" ""password=Password123!"".
@@ -123,6 +126,8 @@ Script specification defined in `[script-specification]` offers following method
   SharpWMI.exe action=setenv name=FOO value=""BAR"" computername=primary.testlab.local
 
   SharpWMI.exe action=delenv name=FOO computername=primary.testlab.local
+
+  SharpWMI.exe action=install computername=primary.testlab.local path=""C:\\temp\\installer.msi""
 ```
 
 Get local TCP netstat-style information from a remote Windows 10 machine:
@@ -145,3 +150,4 @@ SharpWMI has been built against .NET 3.5 and is compatible with [Visual Studio 2
 |WMI code-exec output idea |[Evi1cg @Ridter](https://github.com/Ridter)  |
 |AMSI evasion code taken from SharpMove |[Steven Flores 0xthirteen](https://github.com/0xthirteen)  |
 |Enhancements, VBS flexibility, file upload |[Mariusz B. / mgeeky @mariuszbit](https://github.com/mgeeky)  |
+|Install MSI files |[Justin Bui @slyd0g](https://github.com/slyd0g)  |
